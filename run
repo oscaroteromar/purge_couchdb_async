@@ -1,0 +1,14 @@
+#!/bin/sh
+
+# auto activate virtualenv
+VIRTUAL_ENV='.venv'
+if [ ! -d "$VIRTUAL_ENV" ]; then
+  echo "Virtual environment not present, creating one and installing dependencies"
+  python -m venv "$VIRTUAL_ENV"
+  source "$VIRTUAL_ENV/bin/activate"
+  pip install -r requirements.txt
+else
+  source "$VIRTUAL_ENV/bin/activate"
+fi
+
+python main.py
