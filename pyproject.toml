@@ -1,0 +1,63 @@
+[project]
+name = "purge-couchdb-async"
+version = "0.1.0"
+description = "Purge CouchDB database delete docs asynchronously"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "aiohttp",
+    "requests",
+    "structlog",
+    "python-dotenv"
+]
+
+[tool.black]
+line-length = 130
+target-version = ['py310']
+exclude = '''
+/(
+  \.toml
+  |\.git
+  |Dockerfile
+  |Jenkinfile
+)/
+'''
+
+[tool.isort]
+line_length = 79
+wrap_length = 79
+py_version = 310
+profile = 'black'
+skip = ['.gitignore', '.dockerignore']
+multi_line_output = 3
+skip_gitignore = true
+case_sensitive = true
+group_by_package = true
+include_trailing_comma = true
+combine_star = true
+atomic = true
+use_parentheses = true
+
+[tool.ruff]
+lint.select = [
+ "E",
+ "W",
+ "F",
+ "B",
+ "UP",
+ "C4",
+ "DTZ",
+ "T10",
+ "T20",
+ "G",
+ "SIM",
+ "PLR",
+ "PLW",
+ "RUF",
+]
+lint.ignore = ["B009", "DTZ005", "G004", "UP007"]
+line-length = 130
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
