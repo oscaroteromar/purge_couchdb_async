@@ -4,9 +4,9 @@ import asyncio
 import os
 import time
 import uuid
+from collections.abc import Generator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import Generator
 
 import aiohttp
 import requests
@@ -105,7 +105,7 @@ class Changes:
     def last_seq(self):
         if self._last_seq is None:
             try:
-                with open("last_seq.txt", "r") as f:
+                with open("last_seq.txt") as f:
                     self._last_seq = f.read()
             except FileNotFoundError:
                 pass
@@ -151,7 +151,7 @@ class Changes:
                 lambda change: "doc" in change and change["doc"] is not None and "_deleted" in change["doc"], changes
             )
             deleted_docs: dict[str, list[str]]
-            if not (deleted_docs := dict(map(lambda change: (change["id"], [change["changes"][0]["rev"]]), changes))):
+            if not (deleted_docs := {change["id"]: [change["changes"][0]["rev"]] for change in changes}):
                 logger.info("No deleted docs found in this batch, continue", log_id=LogId().value)
                 continue
             yield deleted_docs
@@ -186,7 +186,9 @@ class Purge:
         log_id = trace_config_ctx.trace_request_ctx["log_id"]
         retry_period = RETRY_START_TIMEOUT * (RETRY_FACTOR**current_attempt)
         response = params.response
-        await logger.adebug(f"Got response {response.status} ({response.reason}), retrying in {retry_period} seconds", log_id=log_id)
+        await logger.adebug(
+            f"Got response {response.status} ({response.reason}), retrying in {retry_period} seconds", log_id=log_id
+        )
 
     @staticmethod
     async def request(session, url, data, log_id, total_purged_docs):
