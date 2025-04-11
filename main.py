@@ -2,9 +2,9 @@
 
 import asyncio
 import os
-import timeit
+import time
 import uuid
-from contextlib import contextmanager
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Generator
 
@@ -33,25 +33,13 @@ RETRY_START_TIMEOUT = 1
 RETRY_FACTOR = 2
 
 
-def human_time(secs):
-    if secs < 60:
-        return f"{secs:.3f}s"
-    mins, secs = int(secs) // 60, secs % 60
-    if mins < 60:
-        return f"{mins}m:{secs:06.3f}s"
-    hrs, mins = mins // 60, mins % 60
-    if hrs < 24:
-        return f"{hrs}h:{mins:02}m:{secs:06.3f}s"
-    days, hrs = hrs // 24, hrs % 24
-    return f"{days}d:{hrs:02}h:{mins:02}m:{secs:06.3f}s"
-
-
-@contextmanager
-def time_it(log_prefix: str = "Time taken", log_id: str | None = None):
-    start = timeit.default_timer()
-    yield
-    end = timeit.default_timer()
-    logger.debug(f"{log_prefix}: {human_time(end - start)}", log_id=log_id)
+@asynccontextmanager
+async def time_it(log_prefix: str = "Time taken", log_id: str | None = None):
+    now = time.monotonic()
+    try:
+        yield
+    finally:
+        logger.debug(f"{log_prefix}: {(time.monotonic() - now):.3f} seconds", log_id=log_id)
 
 
 def async_error_catcher(f):
@@ -198,7 +186,7 @@ class Purge:
     async def request(session, url, data, log_id, total_purged_docs):
         with bound_contextvars(url=url, log_id=log_id):
             await logger.adebug(f"Attempt to purge {len(data)} docs", total_purged_docs=total_purged_docs)
-            with time_it(log_prefix="Single purge"):
+            async with time_it(log_prefix="Single purge"):
                 try:
                     async with RetryClient(
                         client_session=session,
@@ -248,7 +236,6 @@ if __name__ == "__main__":
 
     purger = Purge()
     try:
-        with time_it(log_prefix="Global purge"):
-            asyncio.run(purger.purge_async())
+        asyncio.run(purger.purge_async())
     except KeyboardInterrupt:
         logger.info("Leaving...", log_id=LogId().value)
