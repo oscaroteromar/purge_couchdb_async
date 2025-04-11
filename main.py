@@ -165,6 +165,9 @@ class Changes:
 
 class Purge:
 
+    # Async requests will be sent when the batch has a 10 size.
+    ASYNC_REQUEST_BATCH = 10
+
     def __init__(self):
         self.changes = Changes()
 
@@ -187,7 +190,6 @@ class Purge:
                     )
             except Exception as e:
                 await logger.aerror(f"Error when purging docs: {e}", log_id=log_id)
-        
 
     @async_error_catcher
     async def purge_async(self):
@@ -207,11 +209,16 @@ class Purge:
                     )
                 )
                 tasks.append(task)
-            # Tasks are ran with asyncio.gather
-            # By setting `return_exceptions` to False, we will raise Exceptions within
-            #   their asyncio task instance and everything will stop, by putting True, it
-            #   will raise when `result()` is called on the future.
-            await asyncio.gather(*tasks, return_exceptions=False)
+                # Tasks are ran with asyncio.gather
+                # By setting `return_exceptions` to False, we will raise Exceptions within
+                #   their asyncio task instance and everything will stop, by putting True, it
+                #   will raise when `result()` is called on the future.
+                if len(tasks) >= self.ASYNC_REQUEST_BATCH:
+                    await asyncio.gather(*tasks, return_exceptions=False)
+                    tasks = []
+
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=False)
 
 
 if __name__ == "__main__":
