@@ -50,8 +50,6 @@ def async_error_catcher(f):
     async def wrapper(*args, **kwargs):
         try:
             return await f(*args, **kwargs)
-        except KeyboardInterrupt:
-            await logger.ainfo("Leaving...", log_id=LogId().value)
         except Exception as e:
             await logger.aerror(f"Error in {f.__name__}", error=e, log_id=LogId().value)
 
@@ -64,8 +62,6 @@ def sync_error_catcher(f):
     def wrapper(*args, **kwargs):
         try:
             return f(*args, **kwargs)
-        except KeyboardInterrupt:
-            logger.info("Leaving...", log_id=LogId().value)
         except Exception as e:
             logger.error(f"Error in {f.__name__}", error=e, log_id=LogId().value)
 
@@ -224,5 +220,8 @@ class Purge:
 if __name__ == "__main__":
 
     purger = Purge()
-    with time_it(log_prefix="Global purge"):
-        asyncio.run(purger.purge_async())
+    try:
+        with time_it(log_prefix="Global purge"):
+            asyncio.run(purger.purge_async())
+    except KeyboardInterrupt:
+        logger.info("Leaving...", log_id=LogId().value)
