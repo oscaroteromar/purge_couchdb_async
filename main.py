@@ -170,17 +170,23 @@ class Purge:
         return f"{COUCHDB_URL}/{DB_NAME}/_purge"
 
     @staticmethod
-    async def on_request_start(
+    async def on_request_end(
         session: ClientSession,
         trace_config_ctx: SimpleNamespace,
         params: TraceRequestStartParams,
     ) -> None:
+
+        if params.response.ok:
+            return
+
         current_attempt = trace_config_ctx.trace_request_ctx["current_attempt"]
         if current_attempt == RETRY_ATTEMPTS:
             return
+
         log_id = trace_config_ctx.trace_request_ctx["log_id"]
         retry_period = RETRY_START_TIMEOUT * (RETRY_FACTOR**current_attempt)
-        await logger.adebug(f"Attempt {current_attempt}, retrying in {retry_period} seconds", log_id=log_id)
+        response = params.response
+        await logger.adebug(f"Got response {response.status} ({response.reason}), retrying in {retry_period} seconds", log_id=log_id)
 
     @staticmethod
     async def request(session, url, data, log_id, total_purged_docs):
@@ -205,7 +211,7 @@ class Purge:
         total_purged_docs = 0
         tasks = []
         trace_config = TraceConfig()
-        trace_config.on_request_start.append(Purge.on_request_start)
+        trace_config.on_request_end.append(Purge.on_request_end)
         auth = aiohttp.BasicAuth(login=USER, password=PASSWORD)
         async with aiohttp.ClientSession(auth=auth, trace_configs=[trace_config]) as session:
             for deleted_docs in self.changes.iter_deleted_docs():
