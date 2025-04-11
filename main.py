@@ -5,13 +5,17 @@ import os
 import timeit
 import uuid
 from contextlib import contextmanager
+from types import SimpleNamespace
 from typing import Generator
 
 import aiohttp
 import requests
+from aiohttp import ClientSession, TraceConfig, TraceRequestStartParams
+from aiohttp_retry import ExponentialRetry, RetryClient
 from dotenv import load_dotenv
 from requests.auth import HTTPBasicAuth
 from structlog import get_logger
+from structlog.contextvars import bound_contextvars
 
 load_dotenv()
 
@@ -22,6 +26,12 @@ COUCHDB_URL = os.getenv("COUCHDB_URL")
 DB_NAME = os.getenv("COUCHDB_DB_NAME")
 USER = os.getenv("COUCHDB_USER")
 PASSWORD = os.getenv("COUCHDB_PASSWORD")
+
+# Retry options
+RETRY_ATTEMPTS = 4
+RETRY_START_TIMEOUT = 1
+RETRY_FACTOR = 2
+
 
 def human_time(secs):
     if secs < 60:
@@ -170,29 +180,46 @@ class Purge:
     @property
     def url(self):
         return f"{COUCHDB_URL}/{DB_NAME}/_purge"
-        # return "https://httpbin.org/post"
+
+    @staticmethod
+    async def on_request_start(
+        session: ClientSession,
+        trace_config_ctx: SimpleNamespace,
+        params: TraceRequestStartParams,
+    ) -> None:
+        current_attempt = trace_config_ctx.trace_request_ctx["current_attempt"]
+        if current_attempt == RETRY_ATTEMPTS:
+            return
+        log_id = trace_config_ctx.trace_request_ctx["log_id"]
+        retry_period = RETRY_START_TIMEOUT * (RETRY_FACTOR**current_attempt)
+        await logger.adebug(f"Attempt {current_attempt}, retrying in {retry_period} seconds", log_id=log_id)
 
     @staticmethod
     async def request(session, url, data, log_id, total_purged_docs):
-        await logger.adebug(f"Attempt to purge {len(data)} docs", log_id=log_id, total_purged_docs=total_purged_docs)
-        with time_it(log_prefix="Single purge", log_id=log_id):
-            try:
-                async with session.post(url, json=data) as response:
-                    response.raise_for_status()
-                    await asyncio.sleep(0.3)
-                    # content = await response.json()
-                    await logger.ainfo(
-                        f"Purged {len(data)} docs", log_id=log_id
-                    )
-            except Exception as e:
-                await logger.aerror(f"Error when purging docs: {e}", log_id=log_id)
+        with bound_contextvars(url=url, log_id=log_id):
+            await logger.adebug(f"Attempt to purge {len(data)} docs", total_purged_docs=total_purged_docs)
+            with time_it(log_prefix="Single purge"):
+                try:
+                    async with RetryClient(
+                        client_session=session,
+                        retry_options=ExponentialRetry(
+                            attempts=RETRY_ATTEMPTS, start_timeout=RETRY_START_TIMEOUT, factor=RETRY_FACTOR
+                        ),
+                    ).post(url, json=data, raise_for_status=True, trace_request_ctx={"log_id": log_id}):
+                        await asyncio.sleep(0.3)
+                        # content = await response.json()
+                        await logger.ainfo(f"Purged {len(data)} docs")
+                except Exception as e:
+                    await logger.aerror(f"Error when purging docs: {e}")
 
     @async_error_catcher
     async def purge_async(self):
         total_purged_docs = 0
         tasks = []
+        trace_config = TraceConfig()
+        trace_config.on_request_start.append(Purge.on_request_start)
         auth = aiohttp.BasicAuth(login=USER, password=PASSWORD)
-        async with aiohttp.ClientSession(auth=auth) as session:
+        async with aiohttp.ClientSession(auth=auth, trace_configs=[trace_config]) as session:
             for deleted_docs in self.changes.iter_deleted_docs():
                 total_purged_docs += len(deleted_docs)
                 task = asyncio.create_task(
@@ -201,7 +228,7 @@ class Purge:
                         url=self.url,
                         data=deleted_docs,
                         total_purged_docs=total_purged_docs,
-                        log_id=LogId().value
+                        log_id=LogId().value,
                     )
                 )
                 tasks.append(task)
